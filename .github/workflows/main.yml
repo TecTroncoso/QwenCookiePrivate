@@ -65,17 +65,20 @@ jobs:
           echo "✅ Verificando instalación..."
           koyeb version
 
-      - name: Authenticate with Koyeb
+      - name: Configure Koyeb Authentication
         run: |
-          echo "🔐 Autenticando con Koyeb..."
-          # Crear archivo de configuración para evitar prompts interactivos
-          mkdir -p ~/.koyeb
-          echo "$KOYEB_API_TOKEN" > ~/.koyeb/token
+          echo "🔐 Configurando autenticación con Koyeb..."
+          # La CLI de Koyeb usa la variable de entorno KOYEB_TOKEN para autenticación
+          export KOYEB_TOKEN="$KOYEB_API_TOKEN"
           
-          # Verificar autenticación
-          koyeb profile show
+          # Verificar que tenemos acceso listando las apps
+          echo "✅ Verificando acceso a Koyeb..."
+          koyeb app list --limit 1 -o json > /dev/null
+          echo "✅ Autenticación exitosa"
 
       - name: Update Secret on Koyeb and Trigger Redeployment
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
         run: |
           echo "🔄 Codificando cookies a Base64..."
           B64_COOKIES=$(base64 -w 0 cookies.json)
@@ -132,5 +135,5 @@ jobs:
         if: always()
         run: |
           echo "🧹 Limpiando archivos temporales..."
-          rm -f cookies.json koyeb-cli.tar.gz ~/.koyeb/token
+          rm -f cookies.json koyeb-cli.tar.gz
           echo "✅ Cleanup completado."
