@@ -44,7 +44,7 @@ jobs:
           echo "✅ Archivo 'cookies.json' generado."
 
       - name: Setup Koyeb CLI
-        uses: koyeb/action-cli@v2
+        uses: koyeb/action-cli@v5.7.0
 
       - name: Update Secret on Koyeb and Trigger Redeployment
         run: |
