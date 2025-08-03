@@ -65,17 +65,6 @@ jobs:
           echo "✅ Verificando instalación..."
           koyeb version
 
-      - name: Configure Koyeb Authentication
-        run: |
-          echo "🔐 Configurando autenticación con Koyeb..."
-          # La CLI de Koyeb usa la variable de entorno KOYEB_TOKEN para autenticación
-          export KOYEB_TOKEN="$KOYEB_API_TOKEN"
-          
-          # Verificar que tenemos acceso listando las apps
-          echo "✅ Verificando acceso a Koyeb..."
-          koyeb app list --limit 1 -o json > /dev/null
-          echo "✅ Autenticación exitosa"
-
       - name: Update Secret on Koyeb and Trigger Redeployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
@@ -92,13 +81,12 @@ jobs:
         
           echo "🔍 Buscando servicios en la app '$KOYEB_APP_NAME'..."
           
-          # Obtener lista de servicios y verificar que existe la app
-          SERVICES_JSON=$(koyeb service list --app "$KOYEB_APP_NAME" -o json 2>/dev/null || echo "[]")
+          # Verificar autenticación y obtener servicios
+          SERVICES_JSON=$(koyeb service list --app "$KOYEB_APP_NAME" -o json 2>/dev/null)
           
-          if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
-            echo "::error::No se encontraron servicios en la app '$KOYEB_APP_NAME'."
-            echo "Apps disponibles:"
-            koyeb app list
+          if [ $? -ne 0 ] || [ -z "$SERVICES_JSON" ] || [ "$SERVICES_JSON" = "[]" ]; then
+            echo "::error::No se pudieron listar servicios. Verificando apps disponibles..."
+            koyeb app list -o json
             exit 1
           fi
           
@@ -107,6 +95,7 @@ jobs:
         
           if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
             echo "::error::No se pudo obtener el ID del servicio."
+            echo "Respuesta de la API: $SERVICES_JSON"
             exit 1
           fi
           
