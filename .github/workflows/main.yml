@@ -79,23 +79,45 @@ jobs:
           
           echo "✅ Cookies codificadas (longitud: ${#B64_COOKIES} caracteres)"
         
+          echo "🔍 Listando todas las apps disponibles..."
+          koyeb app list
+          
           echo "🔍 Buscando servicios en la app '$KOYEB_APP_NAME'..."
           
-          # Verificar autenticación y obtener servicios
-          SERVICES_JSON=$(koyeb service list --app "$KOYEB_APP_NAME" -o json 2>/dev/null)
+          # Intentar diferentes sintaxis para el comando service list
+          echo "Intentando: koyeb service list --app $KOYEB_APP_NAME"
+          SERVICES_JSON=$(koyeb service list --app "$KOYEB_APP_NAME" -o json 2>&1)
+          SERVICE_LIST_EXIT_CODE=$?
           
-          if [ $? -ne 0 ] || [ -z "$SERVICES_JSON" ] || [ "$SERVICES_JSON" = "[]" ]; then
-            echo "::error::No se pudieron listar servicios. Verificando apps disponibles..."
-            koyeb app list -o json
+          if [ $SERVICE_LIST_EXIT_CODE -ne 0 ]; then
+            echo "❌ Falló con --app flag. Error: $SERVICES_JSON"
+            echo "Intentando: koyeb service list (sin filtro de app)"
+            SERVICES_JSON=$(koyeb service list -o json 2>&1)
+            SERVICE_LIST_EXIT_CODE=$?
+          fi
+          
+          if [ $SERVICE_LIST_EXIT_CODE -ne 0 ]; then
+            echo "❌ Falló service list. Error: $SERVICES_JSON"
+            echo "Mostrando ayuda del comando:"
+            koyeb service --help
             exit 1
           fi
           
-          SERVICE_ID=$(echo "$SERVICES_JSON" | jq -r '.[0].id')
-          SERVICE_NAME=$(echo "$SERVICES_JSON" | jq -r '.[0].name')
+          echo "✅ Servicios obtenidos: $SERVICES_JSON"
+          
+          # Filtrar por app name si obtuvimos todos los servicios
+          if echo "$SERVICES_JSON" | jq -e '.[] | select(.app_name == "'$KOYEB_APP_NAME'")' >/dev/null 2>&1; then
+            SERVICE_ID=$(echo "$SERVICES_JSON" | jq -r '.[] | select(.app_name == "'$KOYEB_APP_NAME'") | .id' | head -n1)
+            SERVICE_NAME=$(echo "$SERVICES_JSON" | jq -r '.[] | select(.app_name == "'$KOYEB_APP_NAME'") | .name' | head -n1)
+          else
+            # Si no hay campo app_name, tomar el primer servicio
+            SERVICE_ID=$(echo "$SERVICES_JSON" | jq -r '.[0].id')
+            SERVICE_NAME=$(echo "$SERVICES_JSON" | jq -r '.[0].name')
+          fi
         
           if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
             echo "::error::No se pudo obtener el ID del servicio."
-            echo "Respuesta de la API: $SERVICES_JSON"
+            echo "JSON de servicios: $SERVICES_JSON"
             exit 1
           fi
           
