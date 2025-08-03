@@ -1,12 +1,9 @@
-# .github/workflows/main.yml (Versión Final para Koyeb)
-
+# .github/workflows/main.yml (Versión Optimizada para Koyeb)
 name: Weekly Qwen Cookie Refresh & Update Koyeb
-
 on:
   schedule:
-    - cron: "0 3 * * 0" # Todos los domingos a las 3:00 AM UTC
+    - cron: "0 3 * * 0" # Todos los domingos a las 3:00 AM UTC (corregido)
   workflow_dispatch: # Permite ejecución manual
-
 jobs:
   refresh-and-update:
     name: Refresh Cookie and Update Koyeb Secret
@@ -17,7 +14,6 @@ jobs:
       KOYEB_APP_NAME: ${{ secrets.KOYEB_APP_NAME }}
       USERNAME: ${{ secrets.USERNAME }}
       PASSWORD: ${{ secrets.PASSWORD }}
-
     steps:
       - name: Checkout Repository Code
         uses: actions/checkout@v4
@@ -30,68 +26,111 @@ jobs:
       - name: Install Dependencies and Tools
         run: |
           python -m pip install --upgrade pip
-          # Instala xvfb para el navegador headless y jq para procesar JSON
-          sudo apt-get update && sudo apt-get install -y xvfb jq
+          sudo apt-get update && sudo apt-get install -y xvfb jq curl
           pip install -r requirements.txt
 
       - name: Run Selenium Script to Get Cookies
         id: get-cookies
         run: |
+          echo "🔄 Ejecutando script de Selenium para obtener cookies..."
           xvfb-run -a python main.py
+          
           if [ ! -f cookies.json ]; then
             echo "::error::El archivo 'cookies.json' no fue creado."
             exit 1
           fi
-          echo "✅ Archivo 'cookies.json' generado."
+          
+          # Verificar que el archivo no esté vacío
+          if [ ! -s cookies.json ]; then
+            echo "::error::El archivo 'cookies.json' está vacío."
+            exit 1
+          fi
+          
+          echo "✅ Archivo 'cookies.json' generado correctamente."
+          echo "📄 Contenido del archivo (primeras líneas):"
+          head -n 3 cookies.json
 
-      # AÑADE ESTE NUEVO PASO
-      - name: Setup Koyeb CLI (Manual Install)
+      - name: Setup Koyeb CLI
         run: |
-          # Paso 1: Descargar la versión específica de la CLI
-          echo "Downloading Koyeb CLI v5.7.0..."
+          echo "📥 Descargando Koyeb CLI v5.7.0..."
           curl -sL "https://github.com/koyeb/koyeb-cli/releases/download/v5.7.0/koyeb-cli_5.7.0_linux_amd64.tar.gz" -o koyeb-cli.tar.gz
-      
-          # Paso 2: Extraer el archivo binario
-          echo "Extracting CLI..."
+          
+          echo "📦 Extrayendo CLI..."
           tar -xzf koyeb-cli.tar.gz
-      
-          # Paso 3: Mover el binario a una ruta del sistema para que esté disponible globalmente
-          # /usr/local/bin es un directorio estándar para esto.
-          echo "Installing CLI to /usr/local/bin..."
+          
+          echo "⚙️ Instalando CLI..."
           sudo mv koyeb /usr/local/bin/koyeb
-      
-          # Paso 4: Verificar la instalación y que el comando 'koyeb' esté disponible
-          echo "Verifying installation..."
-          which koyeb
+          sudo chmod +x /usr/local/bin/koyeb
+          
+          echo "✅ Verificando instalación..."
           koyeb version
+
+      - name: Authenticate with Koyeb
+        run: |
+          echo "🔐 Autenticando con Koyeb..."
+          # Crear archivo de configuración para evitar prompts interactivos
+          mkdir -p ~/.koyeb
+          echo "$KOYEB_API_TOKEN" > ~/.koyeb/token
+          
+          # Verificar autenticación
+          koyeb profile show
 
       - name: Update Secret on Koyeb and Trigger Redeployment
         run: |
-          echo "Codificando cookies a Base64..."
+          echo "🔄 Codificando cookies a Base64..."
           B64_COOKIES=$(base64 -w 0 cookies.json)
           
           if [ -z "$B64_COOKIES" ]; then
             echo "::error::No se pudieron codificar las cookies."
             exit 1
           fi
+          
+          echo "✅ Cookies codificadas (longitud: ${#B64_COOKIES} caracteres)"
         
-          echo "Buscando el ID del servicio principal en la app '$KOYEB_APP_NAME'..."
-          # Usamos el comando 'koyeb service list' para encontrar el ID de nuestro servicio.
-          # Asumimos que solo hay un servicio en la app, por lo que tomamos el primero ([0]).
-          SERVICE_ID=$(koyeb service list --app "$KOYEB_APP_NAME" -o json | jq -r '.[0].id')
-        
-          if [ -z "$SERVICE_ID" ]; then
-            echo "::error:: No se pudo encontrar ningún servicio en la app '$KOYEB_APP_NAME'."
+          echo "🔍 Buscando servicios en la app '$KOYEB_APP_NAME'..."
+          
+          # Obtener lista de servicios y verificar que existe la app
+          SERVICES_JSON=$(koyeb service list --app "$KOYEB_APP_NAME" -o json 2>/dev/null || echo "[]")
+          
+          if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
+            echo "::error::No se encontraron servicios en la app '$KOYEB_APP_NAME'."
+            echo "Apps disponibles:"
+            koyeb app list
             exit 1
           fi
-          echo "✅ Servicio encontrado con ID: $SERVICE_ID"
+          
+          SERVICE_ID=$(echo "$SERVICES_JSON" | jq -r '.[0].id')
+          SERVICE_NAME=$(echo "$SERVICES_JSON" | jq -r '.[0].name')
         
-          echo "🚀 Actualizando el secreto 'QWEN_COOKIES_JSON_B64' para el servicio..."
-          # Usamos el flag correcto --service con el ID que acabamos de encontrar.
-          koyeb secret update QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES" --service "$SERVICE_ID"
+          if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
+            echo "::error::No se pudo obtener el ID del servicio."
+            exit 1
+          fi
+          
+          echo "✅ Servicio encontrado: $SERVICE_NAME (ID: $SERVICE_ID)"
         
-          echo "✅ Secreto actualizado. Forzando redespliegue para aplicar los cambios..."
-          # Reutilizamos el SERVICE_ID para el comando de redespliegue.
+          echo "🔄 Actualizando el secreto 'QWEN_COOKIES_JSON_B64'..."
+          
+          # Verificar si el secreto existe antes de actualizarlo
+          if koyeb secret show QWEN_COOKIES_JSON_B64 >/dev/null 2>&1; then
+            echo "📝 Actualizando secreto existente..."
+            koyeb secret update QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES"
+          else
+            echo "📝 Creando nuevo secreto..."
+            koyeb secret create QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES"
+          fi
+        
+          echo "✅ Secreto actualizado correctamente."
+          
+          echo "🚀 Iniciando redespliegue del servicio..."
           koyeb service redeploy "$SERVICE_ID"
           
-          echo "✅ Redespliegue iniciado en Koyeb. ¡Misión cumplida!"
+          echo "✅ Redespliegue iniciado en Koyeb."
+          echo "🎯 Proceso completado exitosamente!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Limpiando archivos temporales..."
+          rm -f cookies.json koyeb-cli.tar.gz ~/.koyeb/token
+          echo "✅ Cleanup completado."
