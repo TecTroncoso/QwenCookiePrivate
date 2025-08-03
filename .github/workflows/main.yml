@@ -43,8 +43,26 @@ jobs:
           fi
           echo "✅ Archivo 'cookies.json' generado."
 
-      - name: Setup Koyeb CLI
-        uses: koyeb/action-cli@v5.7.0
+      # AÑADE ESTE NUEVO PASO
+      - name: Setup Koyeb CLI (Manual Install)
+        run: |
+          # Paso 1: Descargar la versión específica de la CLI
+          echo "Downloading Koyeb CLI v5.7.0..."
+          curl -sL "https://github.com/koyeb/koyeb-cli/releases/download/v5.7.0/koyeb-cli_5.7.0_linux_amd64.tar.gz" -o koyeb-cli.tar.gz
+      
+          # Paso 2: Extraer el archivo binario
+          echo "Extracting CLI..."
+          tar -xzf koyeb-cli.tar.gz
+      
+          # Paso 3: Mover el binario a una ruta del sistema para que esté disponible globalmente
+          # /usr/local/bin es un directorio estándar para esto.
+          echo "Installing CLI to /usr/local/bin..."
+          sudo mv koyeb /usr/local/bin/koyeb
+      
+          # Paso 4: Verificar la instalación y que el comando 'koyeb' esté disponible
+          echo "Verifying installation..."
+          which koyeb
+          koyeb version
 
       - name: Update Secret on Koyeb and Trigger Redeployment
         run: |
