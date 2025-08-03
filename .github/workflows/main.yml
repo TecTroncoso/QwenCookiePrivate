@@ -11,6 +11,7 @@ jobs:
   refresh-and-update:
     name: Refresh Cookie and Update Koyeb Secret
     runs-on: ubuntu-latest
+    environment: Qwen
     env:
       KOYEB_API_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
       KOYEB_APP_NAME: ${{ secrets.KOYEB_APP_NAME }}
