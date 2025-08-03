@@ -15,7 +15,7 @@ jobs:
   refresh-and-deploy:
     name: Refresh Cookies and Deploy
     runs-on: ubuntu-latest
-
+    environment: Qwen
     # Define las variables de entorno para todo el job.
     # Estas se leen desde los Secretos del Repositorio de GitHub.
     env:
