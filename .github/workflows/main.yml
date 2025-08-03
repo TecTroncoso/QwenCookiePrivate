@@ -1,0 +1,110 @@
+# .github/workflows/main.yml
+# Workflow para refrescar semanalmente las cookies de Qwen y desplegar en Fly.io
+
+name: Weekly Qwen Cookie Refresh & Deploy to Fly.io
+
+on:
+  # Se ejecuta automáticamente cada domingo a las 3:00 AM UTC.
+  schedule:
+    - cron: "0 3 * * 0"
+
+  # Permite la ejecución manual desde la pestaña "Actions" de GitHub.
+  workflow_dispatch:
+
+jobs:
+  refresh-and-deploy:
+    name: Refresh Cookies and Deploy
+    runs-on: ubuntu-latest
+
+    # Define las variables de entorno para todo el job.
+    # Estas se leen desde los Secretos del Repositorio de GitHub.
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_APP_NAME: ${{ secrets.FLY_APP_NAME }} # ej: mi-app-qwen-proxy
+      USERNAME: ${{ secrets.USERNAME }}
+      PASSWORD: ${{ secrets.PASSWORD }}
+      # Fija la región de Fly.io para evitar ambigüedades.
+      # Cambia 'scl' por tu región primaria si es diferente.
+      FLY_REGION: "scl"
+
+    steps:
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Pip Dependencies
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          # La clave de caché incluye el hash del archivo requirements.txt.
+          # Si el archivo no cambia, se reutiliza la caché.
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Instala xvfb, un servidor de display virtual para el navegador headless.
+          sudo apt-get update && sudo apt-get install -y xvfb
+          pip install -r requirements.txt
+
+      - name: Run Selenium Script to Get Cookies
+        id: get-cookies
+        run: |
+          echo "Ejecutando script de Selenium para obtener las cookies..."
+          # xvfb-run crea un display virtual para que Chrome pueda ejecutarse.
+          # main.py es el nombre de tu script de Selenium.
+          xvfb-run -a python main.py
+
+          # Verificación para asegurarse de que el archivo de cookies se creó.
+          if [ ! -f cookies.json ]; then
+            echo "::error::El archivo 'cookies.json' no fue creado por el script de Selenium."
+            exit 1
+          fi
+          echo "✅ Archivo 'cookies.json' generado exitosamente."
+
+      - name: Setup Fly.io CLI (flyctl)
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Ensure Persistent Volume Exists
+        id: ensure-volume
+        run: |
+          echo "Verificando si el volumen 'data' existe para la app '$FLY_APP_NAME'..."
+          # Usamos 'jq' para verificar si el volumen ya existe en la lista de volúmenes de la app.
+          # La opción -e de jq hace que el comando falle si no encuentra resultados.
+          if flyctl volumes list --app "$FLY_APP_NAME" --json | jq -e '.[] | select(.name == "data")' > /dev/null; then
+            echo "✅ El volumen 'data' ya existe. No se necesita hacer nada."
+          else
+            echo "⚠️ El volumen 'data' no existe. Creándolo ahora..."
+            flyctl volumes create data --size 1 --app "$FLY_APP_NAME" --region "$FLY_REGION"
+            echo "✅ Volumen 'data' creado exitosamente."
+          fi
+      
+      - name: Update Secret and Trigger Redeployment on Fly.io
+        id: deploy
+        run: |
+          echo "Codificando 'cookies.json' a Base64..."
+          # El flag -w 0 es CRUCIAL para evitar saltos de línea en la salida de base64.
+          B64_COOKIES=$(base64 -w 0 cookies.json)
+          
+          if [ -z "$B64_COOKIES" ]; then
+            echo "::error::El archivo de cookies está vacío o no se pudo codificar a Base64."
+            exit 1
+          fi
+
+          echo "✅ Cookies codificadas (${#B64_COOKIES} caracteres)."
+          echo "🚀 Actualizando el secreto 'QWEN_COOKIES_JSON_B64' en la app '$FLY_APP_NAME'..."
+
+          # Pasa el valor del secreto a través de un pipe a 'flyctl'.
+          # Esto es más seguro y robusto que pasarlo como argumento de línea de comando.
+          # El guion '-' al final le dice a flyctl que lea desde la entrada estándar (stdin).
+          echo "$B64_COOKIES" | flyctl secrets set QWEN_COOKIES_JSON_B64 --app "$FLY_APP_NAME" -
+          
+          echo "✅ Secreto actualizado exitosamente."
+          echo "Fly.io gestionará automáticamente el redespliegue de la aplicación para aplicar el nuevo secreto."
