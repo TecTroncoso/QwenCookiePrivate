@@ -74,15 +74,24 @@ jobs:
             echo "::error::No se pudieron codificar las cookies."
             exit 1
           fi
-
-          echo "🚀 Actualizando el secreto 'QWEN_COOKIES_JSON_B64' en Koyeb..."
-          # El comando 'koyeb secret update' crea o actualiza el secreto.
-          # Usamos --app para apuntar a la aplicación correcta.
-          koyeb secret update QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES" --app "$KOYEB_APP_NAME"
-
-          echo "✅ Secreto actualizado. Forzando redespliegue para aplicar cambios..."
-          # Buscamos el ID del servicio principal dentro de la app para redesplegarlo.
-          # Esto asume que solo hay un servicio en la app, lo cual es tu caso.
+        
+          echo "Buscando el ID del servicio principal en la app '$KOYEB_APP_NAME'..."
+          # Usamos el comando 'koyeb service list' para encontrar el ID de nuestro servicio.
+          # Asumimos que solo hay un servicio en la app, por lo que tomamos el primero ([0]).
           SERVICE_ID=$(koyeb service list --app "$KOYEB_APP_NAME" -o json | jq -r '.[0].id')
+        
+          if [ -z "$SERVICE_ID" ]; then
+            echo "::error:: No se pudo encontrar ningún servicio en la app '$KOYEB_APP_NAME'."
+            exit 1
+          fi
+          echo "✅ Servicio encontrado con ID: $SERVICE_ID"
+        
+          echo "🚀 Actualizando el secreto 'QWEN_COOKIES_JSON_B64' para el servicio..."
+          # Usamos el flag correcto --service con el ID que acabamos de encontrar.
+          koyeb secret update QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES" --service "$SERVICE_ID"
+        
+          echo "✅ Secreto actualizado. Forzando redespliegue para aplicar los cambios..."
+          # Reutilizamos el SERVICE_ID para el comando de redespliegue.
           koyeb service redeploy "$SERVICE_ID"
-          echo "✅ Redespliegue iniciado en Koyeb."
+          
+          echo "✅ Redespliegue iniciado en Koyeb. ¡Misión cumplida!"
