@@ -1,4 +1,4 @@
-# .github/workflows/main.yml (Versión Completa y Mejorada para Render)
+# .github/workflows/main.yml (Versión Final Corregida y Simplificada)
 name: Weekly Qwen Cookie Refresh & Update Render
 on:
   schedule:
@@ -27,7 +27,6 @@ jobs:
       - name: Install Dependencies and Tools
         run: |
           python -m pip install --upgrade pip
-          # jq es esencial para procesar la respuesta JSON de la API de Render
           sudo apt-get update && sudo apt-get install -y xvfb jq curl
           pip install -r requirements.txt
 
@@ -56,54 +55,24 @@ jobs:
           
           echo "✅ Cookies codificadas (longitud: ${#B64_COOKIES} caracteres)"
         
-          # --- VERSIÓN MEJORADA CON MANEJO DE ERRORES DETALLADO ---
-          echo "🔍 Buscando el ID de la variable de entorno 'QWEN_COOKIES_JSON_B64' en Render..."
+          # --- ENFOQUE CORREGIDO Y SIMPLIFICADO ---
+          # No necesitamos buscar el ID. Usamos una petición PUT para crear o actualizar la variable directamente.
           
-          # Guardamos la respuesta y el código de estado HTTP por separado
-          HTTP_STATUS=$(curl -s -w "%{http_code}" -o response.json \
-            -H "Authorization: Bearer $RENDER_API_KEY" \
-            -H "Accept: application/json" \
-            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars")
+          echo "🔄 Actualizando la variable de entorno 'QWEN_COOKIES_JSON_B64' en Render..."
 
-          # Verificamos si la llamada a la API fue exitosa (código 200)
-          if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "::error::Falló la llamada a la API de Render (Código de estado: $HTTP_STATUS)."
-            echo "Respuesta de la API:"
-            cat response.json
-            echo "Verifica que RENDER_SERVICE_ID y RENDER_API_KEY sean correctos en los secretos de GitHub."
-            exit 1
-          fi
+          # Construimos el payload JSON. El formato es un array de objetos.
+          JSON_PAYLOAD=$(printf '[{"key": "QWEN_COOKIES_JSON_B64", "value": "%s"}]' "$B64_COOKIES")
 
-          # --- PASO DE DEPURACIÓN AÑADIDO ---
-          echo "✅ Llamada a la API exitosa. Variables de entorno recibidas de Render:"
-          # Imprime el JSON de forma legible para que puedas inspeccionarlo en los logs
-          cat response.json | jq '.'
-          # --- FIN DEL PASO DE DEPURACIÓN ---
-
-          # Si la llamada fue exitosa, ahora sí procesamos el JSON
-          ENV_VAR_ID=$(cat response.json | jq -r '.[] | select(.key == "QWEN_COOKIES_JSON_B64") | .id')
-
-          if [ -z "$ENV_VAR_ID" ] || [ "$ENV_VAR_ID" = "null" ]; then
-            echo "::error::No se pudo encontrar la variable 'QWEN_COOKIES_JSON_B64' en la respuesta de la API de arriba."
-            echo "Verifica que no haya espacios en blanco en el nombre de la clave en la UI de Render."
-            exit 1
-          fi
-          
-          echo "✅ ID de la variable de entorno encontrado: $ENV_VAR_ID"
-
-          # El resto del script para actualizar y redesplegar...
-          echo "🔄 Actualizando la variable de entorno en Render..."
-          
-          # Usamos curl con --fail para que el script falle si la petición no devuelve un código 2xx
-          curl --fail -X PUT "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars/$ENV_VAR_ID" \
+          # Enviamos la petición PUT para actualizar la variable
+          curl --fail -X PUT "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            -d "{\"value\": \"$B64_COOKIES\"}"
+            -d "$JSON_PAYLOAD"
 
-          echo "✅ Variable de entorno actualizada correctamente."
+          echo "✅ Variable de entorno actualizada correctamente en Render."
           
-          echo "🚀 Iniciando redespliegue del servicio en Render..."
+          echo "🚀 Iniciando redespliegue del servicio para aplicar los cambios..."
           
           curl --fail -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
@@ -118,5 +87,6 @@ jobs:
         if: always()
         run: |
           echo "🧹 Limpiando archivos temporales..."
-          rm -f cookies.json response.json
+          # Ya no generamos response.json
+          rm -f cookies.json
           echo "✅ Cleanup completado."
