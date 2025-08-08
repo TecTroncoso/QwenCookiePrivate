@@ -1,4 +1,4 @@
-# .github/workflows/main.yml (Versión Adaptada para Render)
+# .github/workflows/main.yml (Versión Completa y Mejorada para Render)
 name: Weekly Qwen Cookie Refresh & Update Render
 on:
   schedule:
@@ -9,7 +9,6 @@ jobs:
     name: Refresh Cookie and Update Render Env Var
     runs-on: ubuntu-latest
     environment: Qwen
-    # No necesitas 'environment' a menos que lo uses para protección de secrets
     env:
       # Secretos necesarios para el script y la API de Render
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -44,20 +43,20 @@ jobs:
           fi
           
           echo "✅ Archivo 'cookies.json' generado correctamente."
-          echo "📄 Contenido del archivo (primeras líneas):"
-          head -n 3 cookies.json
 
       - name: Update Env Var on Render and Trigger Redeployment
         run: |
           echo "🔄 Codificando cookies a Base64..."
           B64_COOKIES=$(base64 -w 0 cookies.json)
+          
           if [ -z "$B64_COOKIES" ]; then
             echo "::error::No se pudieron codificar las cookies."
             exit 1
           fi
+          
           echo "✅ Cookies codificadas (longitud: ${#B64_COOKIES} caracteres)"
         
-          # --- VERSIÓN MEJORADA CON MANEJO DE ERRORES ---
+          # --- VERSIÓN MEJORADA CON MANEJO DE ERRORES DETALLADO ---
           echo "🔍 Buscando el ID de la variable de entorno 'QWEN_COOKIES_JSON_B64' en Render..."
           
           # Guardamos la respuesta y el código de estado HTTP por separado
@@ -75,12 +74,18 @@ jobs:
             exit 1
           fi
 
+          # --- PASO DE DEPURACIÓN AÑADIDO ---
+          echo "✅ Llamada a la API exitosa. Variables de entorno recibidas de Render:"
+          # Imprime el JSON de forma legible para que puedas inspeccionarlo en los logs
+          cat response.json | jq '.'
+          # --- FIN DEL PASO DE DEPURACIÓN ---
+
           # Si la llamada fue exitosa, ahora sí procesamos el JSON
           ENV_VAR_ID=$(cat response.json | jq -r '.[] | select(.key == "QWEN_COOKIES_JSON_B64") | .id')
 
           if [ -z "$ENV_VAR_ID" ] || [ "$ENV_VAR_ID" = "null" ]; then
-            echo "::error::La llamada a la API fue exitosa, pero no se encontró la variable 'QWEN_COOKIES_JSON_B64'."
-            echo "Asegúrate de que la variable exista en el entorno de tu servicio de Render."
+            echo "::error::No se pudo encontrar la variable 'QWEN_COOKIES_JSON_B64' en la respuesta de la API de arriba."
+            echo "Verifica que no haya espacios en blanco en el nombre de la clave en la UI de Render."
             exit 1
           fi
           
@@ -88,6 +93,8 @@ jobs:
 
           # El resto del script para actualizar y redesplegar...
           echo "🔄 Actualizando la variable de entorno en Render..."
+          
+          # Usamos curl con --fail para que el script falle si la petición no devuelve un código 2xx
           curl --fail -X PUT "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars/$ENV_VAR_ID" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
@@ -97,6 +104,7 @@ jobs:
           echo "✅ Variable de entorno actualizada correctamente."
           
           echo "🚀 Iniciando redespliegue del servicio en Render..."
+          
           curl --fail -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
@@ -110,5 +118,5 @@ jobs:
         if: always()
         run: |
           echo "🧹 Limpiando archivos temporales..."
-          rm -f cookies.json
+          rm -f cookies.json response.json
           echo "✅ Cleanup completado."
