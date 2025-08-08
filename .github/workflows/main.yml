@@ -8,6 +8,7 @@ jobs:
   refresh-and-update:
     name: Refresh Cookie and Update Render Env Var
     runs-on: ubuntu-latest
+    environment: Qwen
     # No necesitas 'environment' a menos que lo uses para protección de secrets
     env:
       # Secretos necesarios para el script y la API de Render
