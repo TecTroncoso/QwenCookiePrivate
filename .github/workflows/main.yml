@@ -1,17 +1,18 @@
-# .github/workflows/main.yml (Versión Optimizada para Koyeb)
-name: Weekly Qwen Cookie Refresh & Update Koyeb
+# .github/workflows/main.yml (Versión Adaptada para Render)
+name: Weekly Qwen Cookie Refresh & Update Render
 on:
   schedule:
-    - cron: "0 3 * * 0" # Todos los domingos a las 3:00 AM UTC (corregido)
+    - cron: "0 3 * * 0" # Todos los domingos a las 3:00 AM UTC
   workflow_dispatch: # Permite ejecución manual
 jobs:
   refresh-and-update:
-    name: Refresh Cookie and Update Koyeb Secret
+    name: Refresh Cookie and Update Render Env Var
     runs-on: ubuntu-latest
-    environment: Qwen
+    # No necesitas 'environment' a menos que lo uses para protección de secrets
     env:
-      KOYEB_API_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
-      KOYEB_APP_NAME: ${{ secrets.KOYEB_APP_NAME }}
+      # Secretos necesarios para el script y la API de Render
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
       USERNAME: ${{ secrets.USERNAME }}
       PASSWORD: ${{ secrets.PASSWORD }}
     steps:
@@ -26,6 +27,7 @@ jobs:
       - name: Install Dependencies and Tools
         run: |
           python -m pip install --upgrade pip
+          # jq es esencial para procesar la respuesta JSON de la API de Render
           sudo apt-get update && sudo apt-get install -y xvfb jq curl
           pip install -r requirements.txt
 
@@ -35,14 +37,8 @@ jobs:
           echo "🔄 Ejecutando script de Selenium para obtener cookies..."
           xvfb-run -a python main.py
           
-          if [ ! -f cookies.json ]; then
-            echo "::error::El archivo 'cookies.json' no fue creado."
-            exit 1
-          fi
-          
-          # Verificar que el archivo no esté vacío
           if [ ! -s cookies.json ]; then
-            echo "::error::El archivo 'cookies.json' está vacío."
+            echo "::error::El archivo 'cookies.json' no fue creado o está vacío."
             exit 1
           fi
           
@@ -50,24 +46,7 @@ jobs:
           echo "📄 Contenido del archivo (primeras líneas):"
           head -n 3 cookies.json
 
-      - name: Setup Koyeb CLI
-        run: |
-          echo "📥 Descargando Koyeb CLI v5.7.0..."
-          curl -sL "https://github.com/koyeb/koyeb-cli/releases/download/v5.7.0/koyeb-cli_5.7.0_linux_amd64.tar.gz" -o koyeb-cli.tar.gz
-          
-          echo "📦 Extrayendo CLI..."
-          tar -xzf koyeb-cli.tar.gz
-          
-          echo "⚙️ Instalando CLI..."
-          sudo mv koyeb /usr/local/bin/koyeb
-          sudo chmod +x /usr/local/bin/koyeb
-          
-          echo "✅ Verificando instalación..."
-          koyeb version
-
-      - name: Update Secret on Koyeb and Trigger Redeployment
-        env:
-          KOYEB_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
+      - name: Update Env Var on Render and Trigger Redeployment
         run: |
           echo "🔄 Codificando cookies a Base64..."
           B64_COOKIES=$(base64 -w 0 cookies.json)
@@ -79,61 +58,53 @@ jobs:
           
           echo "✅ Cookies codificadas (longitud: ${#B64_COOKIES} caracteres)"
         
-          echo "🔍 Listando todas las apps disponibles..."
-          koyeb app list
+          # --- INTERACCIÓN CON LA API DE RENDER ---
+
+          # 1. OBTENER EL ID DE LA VARIABLE DE ENTORNO
+          # La API de Render necesita el ID específico de la variable, no solo su nombre.
+          echo "🔍 Buscando el ID de la variable de entorno 'QWEN_COOKIES_JSON_B64' en Render..."
           
-          echo "🔍 Buscando servicios..."
-          
-          # Listar todos los servicios sin filtro
-          SERVICES_JSON=$(koyeb service list -o json 2>&1)
-          SERVICE_LIST_EXIT_CODE=$?
-          
-          if [ $SERVICE_LIST_EXIT_CODE -ne 0 ]; then
-            echo "❌ Falló service list. Error: $SERVICES_JSON"
-            echo "Mostrando ayuda del comando:"
-            koyeb service --help
+          ENV_VARS_JSON=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+                               -H "Accept: application/json" \
+                               "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars")
+
+          ENV_VAR_ID=$(echo "$ENV_VARS_JSON" | jq -r '.[] | select(.key == "QWEN_COOKIES_JSON_B64") | .id')
+
+          if [ -z "$ENV_VAR_ID" ] || [ "$ENV_VAR_ID" = "null" ]; then
+            echo "::error::No se pudo encontrar el ID de la variable de entorno 'QWEN_COOKIES_JSON_B64'."
+            echo "Asegúrate de que la variable exista en tu servicio de Render y que RENDER_SERVICE_ID sea correcto."
             exit 1
           fi
           
-          echo "✅ Servicios obtenidos exitosamente"
+          echo "✅ ID de la variable de entorno encontrado: $ENV_VAR_ID"
+
+          # 2. ACTUALIZAR LA VARIABLE DE ENTORNO CON LAS NUEVAS COOKIES
+          # Usamos una petición PUT al endpoint específico de la variable.
+          echo "🔄 Actualizando la variable de entorno en Render..."
           
-          # El JSON viene en formato {"services": [...]} no directamente como array
-          # Extraer el primer servicio disponible
-          SERVICE_ID=$(echo "$SERVICES_JSON" | jq -r '.services[0].id')
-          SERVICE_NAME=$(echo "$SERVICES_JSON" | jq -r '.services[0].name')
-          FOUND_APP_ID=$(echo "$SERVICES_JSON" | jq -r '.services[0].app_id')
-        
-          if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
-            echo "::error::No se pudo obtener el ID del servicio."
-            echo "JSON de servicios: $SERVICES_JSON"
-            exit 1
-          fi
+          curl --fail -X PUT "https://api.render.com/v1/services/$RENDER_SERVICE_ID/env-vars/$ENV_VAR_ID" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d "{\"value\": \"$B64_COOKIES\"}"
+
+          echo "✅ Variable de entorno actualizada correctamente."
           
-          echo "✅ Servicio encontrado: $SERVICE_NAME (ID: $SERVICE_ID)"
-          echo "📱 App ID asociada: $FOUND_APP_ID"
-        
-          echo "🔄 Actualizando el secreto 'QWEN_COOKIES_JSON_B64'..."
+          # 3. INICIAR UN NUEVO DESPLIEGUE PARA APLICAR LOS CAMBIOS
+          echo "🚀 Iniciando redespliegue del servicio en Render..."
           
-          # Verificar si el secreto existe antes de actualizarlo
-          if koyeb secret show QWEN_COOKIES_JSON_B64 >/dev/null 2>&1; then
-            echo "📝 Actualizando secreto existente..."
-            koyeb secret update QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES"
-          else
-            echo "📝 Creando nuevo secreto..."
-            koyeb secret create QWEN_COOKIES_JSON_B64 --value "$B64_COOKIES"
-          fi
-        
-          echo "✅ Secreto actualizado correctamente."
-          
-          echo "🚀 Iniciando redespliegue del servicio..."
-          koyeb service redeploy "$SERVICE_ID"
-          
-          echo "✅ Redespliegue iniciado en Koyeb."
+          curl --fail -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d '{"clearCache": "no"}'
+            
+          echo "✅ Redespliegue iniciado en Render."
           echo "🎯 Proceso completado exitosamente!"
 
       - name: Cleanup
         if: always()
         run: |
           echo "🧹 Limpiando archivos temporales..."
-          rm -f cookies.json koyeb-cli.tar.gz
+          rm -f cookies.json
           echo "✅ Cleanup completado."
